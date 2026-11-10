@@ -32,6 +32,14 @@ jobs:
         run: |
           python3 pella_renew.py
 
+      - name: 📷 上传失败截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-fail-screenshot
+          path: login_fail.png
+          if-no-files-found: ignore
+
       # 定时提交时间戳，避免仓库 60 天无活动导致 GitHub 停用定时任务
       - name: 🕒 更新运行时间
         if: always()

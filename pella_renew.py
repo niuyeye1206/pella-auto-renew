@@ -158,7 +158,11 @@ async def main():
             tg_send("Pella 续期失败：点 Continue 后未出现密码框。")
             sys.exit(1)
         await pwd_el.type(PELLA_PASSWORD, {"delay": 20})
-        print("已填密码")
+        pwd_len = await page.evaluate(
+            "() => { const el = document.querySelector(\"input[type='password']\");"
+            " return el ? el.value.length : -1; }"
+        )
+        print("已填密码，密码框字符数:", pwd_len)
         submit = await find_handle(page, JS_FIND_BUTTON, "Continue")
         if not submit:
             submit = await find_handle(page, JS_FIND_BUTTON, "Sign in")
@@ -174,6 +178,10 @@ async def main():
             await asyncio.sleep(1)
         if "/login" in page.url:
             print("登录后仍停留在登录页，登录失败，当前 URL:", page.url)
+            err_text = await page.evaluate(
+                "() => document.body.innerText.slice(0, 800)"
+            )
+            print("登录页可见文字:", err_text)
             await page.screenshot({"path": "login_fail.png"})
             tg_send("Pella 续期失败：登录未成功（仍停留在登录页），请检查账号密码。")
             sys.exit(1)
