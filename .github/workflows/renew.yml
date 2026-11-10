@@ -1,0 +1,48 @@
+name: Pella Auto Renew
+
+on:
+  schedule:
+    - cron: '30 22 * * *' # 每天 北京时间 06:30
+    - cron: '30 10 * * *' # 每天 北京时间 18:30（备用，同天补领）
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  renew-pella:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: ⚙ 设置 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 🛠️ 安装依赖
+        run: |
+          pip install pyppeteer requests
+
+      - name: 🚀 运行续期脚本
+        env:
+          PELLA_EMAIL: ${{ secrets.PELLA_EMAIL }}
+          PELLA_PASSWORD: ${{ secrets.PELLA_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          python3 pella_renew.py
+
+      # 定时提交时间戳，避免仓库 60 天无活动导致 GitHub 停用定时任务
+      - name: 🕒 更新运行时间
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M:%S')" > time.txt
+          git add time.txt
+          if git diff --cached --quiet; then
+            echo "No need to commit"
+          else
+            git commit -m "Update time $(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M:%S')"
+            git push origin main
+          fi
