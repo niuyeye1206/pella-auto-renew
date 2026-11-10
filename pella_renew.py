@@ -105,6 +105,33 @@ async def wait_for(page, js, timeout=30000, poll=1000):
     return None
 
 
+JS_SET_INPUT = """(kind, value) => {
+    let el = null;
+    if (kind === 'email') {
+        const cands = [...document.querySelectorAll('input')].filter(i => i.offsetParent !== null);
+        el = cands.find(i =>
+            (i.placeholder && /email/i.test(i.placeholder)) ||
+            (i.name && /identifier|email/i.test(i.name)) ||
+            (i.type === 'email') ||
+            (i.getAttribute('aria-label') && /email/i.test(i.getAttribute('aria-label')))
+        );
+    } else {
+        el = [...document.querySelectorAll("input[type='password']")].find(i => i.offsetParent !== null);
+    }
+    if (!el) return -1;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return el.value.length;
+}"""
+
+
+async def set_input_value(page, kind, value):
+    """用原生 setter 一次性写入输入框（避免逐字输入时 React 重渲染丢字符），返回填入后的字符数。"""
+    return await page.evaluate(JS_SET_INPUT, kind, value)
+
+
 async def main():
     from pyppeteer import launch
 
@@ -132,37 +159,42 @@ async def main():
         print("打开登录页", LOGIN_URL)
         await page.goto(LOGIN_URL, {"waitUntil": "networkidle2", "timeout": 60000})
         await asyncio.sleep(2)
-        email_el = await find_handle(page, JS_FIND_EMAIL)
-        if not email_el:
+        email_len = await set_input_value(page, "email", PELLA_EMAIL)
+        if email_len < 0:
             print("找不到邮箱输入框")
             await page.screenshot({"path": "login_fail.png"})
             tg_send("Pella 续期失败：登录页找不到邮箱输入框（页面可能变了）。")
             sys.exit(1)
-        await email_el.type(PELLA_EMAIL, {"delay": 20})
-        print("已填邮箱")
+        print("已填邮箱，邮箱框字符数:", email_len, "期望:", len(PELLA_EMAIL))
+        if email_len != len(PELLA_EMAIL):
+            print("邮箱未完整填入")
+            await page.screenshot({"path": "login_fail.png"})
+            tg_send("Pella 续期失败：邮箱框未完整填入。")
+            sys.exit(1)
         cont = await find_handle(page, JS_FIND_BUTTON, "Continue")
         if not cont:
             print("找不到 Continue 按钮")
             sys.exit(1)
         await cont.click()
         print("已点 Continue，等密码框...")
-        pwd_el = None
-        for _ in range(30):
-            pwd_el = await find_handle(page, JS_FIND_PASSWORD)
-            if pwd_el:
-                break
-            await asyncio.sleep(1)
-        if not pwd_el:
+        pwd_ready = await wait_for(
+            page,
+            "() => { const el = document.querySelector(\"input[type='password']\");"
+            " return !!(el && el.offsetParent !== null); }",
+            timeout=30000,
+        )
+        if not pwd_ready:
             print("点 Continue 后 30 秒未出现密码框")
             await page.screenshot({"path": "login_fail.png"})
             tg_send("Pella 续期失败：点 Continue 后未出现密码框。")
             sys.exit(1)
-        await pwd_el.type(PELLA_PASSWORD, {"delay": 20})
-        pwd_len = await page.evaluate(
-            "() => { const el = document.querySelector(\"input[type='password']\");"
-            " return el ? el.value.length : -1; }"
-        )
-        print("已填密码，密码框字符数:", pwd_len)
+        pwd_len = await set_input_value(page, "password", PELLA_PASSWORD)
+        print("已填密码，密码框字符数:", pwd_len, "期望:", len(PELLA_PASSWORD))
+        if pwd_len != len(PELLA_PASSWORD):
+            print("密码未完整填入")
+            await page.screenshot({"path": "login_fail.png"})
+            tg_send("Pella 续期失败：密码框未完整填入。")
+            sys.exit(1)
         submit = await find_handle(page, JS_FIND_BUTTON, "Continue")
         if not submit:
             submit = await find_handle(page, JS_FIND_BUTTON, "Sign in")
