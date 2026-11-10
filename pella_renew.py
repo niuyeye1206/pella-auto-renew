@@ -105,31 +105,43 @@ async def wait_for(page, js, timeout=30000, poll=1000):
     return None
 
 
-JS_SET_INPUT = """(kind, value) => {
-    let el = null;
+JS_FIELD_LEN = """(kind) => {
     if (kind === 'email') {
         const cands = [...document.querySelectorAll('input')].filter(i => i.offsetParent !== null);
-        el = cands.find(i =>
+        const el = cands.find(i =>
             (i.placeholder && /email/i.test(i.placeholder)) ||
             (i.name && /identifier|email/i.test(i.name)) ||
-            (i.type === 'email') ||
-            (i.getAttribute('aria-label') && /email/i.test(i.getAttribute('aria-label')))
+            (i.type === 'email')
         );
-    } else {
-        el = [...document.querySelectorAll("input[type='password']")].find(i => i.offsetParent !== null);
+        return el ? el.value.length : -1;
     }
-    if (!el) return -1;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(el, value);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return el.value.length;
+    const el = [...document.querySelectorAll("input[type='password']")].find(i => i.offsetParent !== null);
+    return el ? el.value.length : -1;
 }"""
 
 
-async def set_input_value(page, kind, value):
-    """用原生 setter 一次性写入输入框（避免逐字输入时 React 重渲染丢字符），返回填入后的字符数。"""
-    return await page.evaluate(JS_SET_INPUT, kind, value)
+async def type_robust(page, kind, value):
+    """点进输入框后用真实键盘事件逐字输入（确保 React 状态同步），
+    填完核对字符数，丢字符就清空重输，最多 3 次。返回最终字符数。"""
+    find_js = JS_FIND_EMAIL if kind == "email" else JS_FIND_PASSWORD
+    length = -1
+    for attempt in range(3):
+        el = await find_handle(page, find_js)
+        if not el:
+            return -1
+        await el.click()
+        await asyncio.sleep(0.3)
+        await page.keyboard.down("Control")
+        await page.keyboard.press("KeyA")
+        await page.keyboard.up("Control")
+        await page.keyboard.press("Backspace")
+        await page.keyboard.type(value, {"delay": 50})
+        await asyncio.sleep(0.5)
+        length = await page.evaluate(JS_FIELD_LEN, kind)
+        print(f"{kind} 填入后字符数: {length} 期望: {len(value)} (尝试 {attempt + 1})")
+        if length == len(value):
+            return length
+    return length
 
 
 async def main():
@@ -159,13 +171,12 @@ async def main():
         print("打开登录页", LOGIN_URL)
         await page.goto(LOGIN_URL, {"waitUntil": "networkidle2", "timeout": 60000})
         await asyncio.sleep(2)
-        email_len = await set_input_value(page, "email", PELLA_EMAIL)
+        email_len = await type_robust(page, "email", PELLA_EMAIL)
         if email_len < 0:
             print("找不到邮箱输入框")
             await page.screenshot({"path": "login_fail.png"})
             tg_send("Pella 续期失败：登录页找不到邮箱输入框（页面可能变了）。")
             sys.exit(1)
-        print("已填邮箱，邮箱框字符数:", email_len, "期望:", len(PELLA_EMAIL))
         if email_len != len(PELLA_EMAIL):
             print("邮箱未完整填入")
             await page.screenshot({"path": "login_fail.png"})
@@ -188,8 +199,7 @@ async def main():
             await page.screenshot({"path": "login_fail.png"})
             tg_send("Pella 续期失败：点 Continue 后未出现密码框。")
             sys.exit(1)
-        pwd_len = await set_input_value(page, "password", PELLA_PASSWORD)
-        print("已填密码，密码框字符数:", pwd_len, "期望:", len(PELLA_PASSWORD))
+        pwd_len = await type_robust(page, "password", PELLA_PASSWORD)
         if pwd_len != len(PELLA_PASSWORD):
             print("密码未完整填入")
             await page.screenshot({"path": "login_fail.png"})
