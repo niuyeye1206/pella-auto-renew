@@ -225,7 +225,7 @@ async def main():
             )
             print("登录页可见文字:", err_text)
             await page.screenshot({"path": "login_fail.png"})
-            tg_send("Pella 续期失败：登录未成功（仍停留在登录页），请检查账号密码。")
+            tg_send("🇺🇸 Pella 续期通知\n❌ 续期失败：登录未成功（仍停留在登录页），请检查账号密码。")
             sys.exit(1)
         print("登录成功，当前 URL:", page.url)
 
@@ -238,10 +238,12 @@ async def main():
         links = await page.evaluate(JS_CLAIM_LINKS)
         print("找到可领取的链接:", len(links), links)
         if not links:
+            short = re.search(r"expires in ([0-9A-Z ]+?)\.", expiry_before or "")
             msg = (
-                "Pella 续期检查：暂无可领取的链接（两条都已领过或未刷新）\n"
-                f"剩余时间：{expiry_before or '未读到'}\n"
-                "服务器 pella-node 仍在运行，下次定时再试。"
+                "🇺🇸 Pella 续期通知\n"
+                "⏳ 暂无可领取的链接（两条都已领过或未刷新）\n"
+                f"⏱ 剩余时间：{short.group(1) if short else (expiry_before or '未读到')}\n"
+                "🖥️ 服务器 pella-node 仍在运行，下次定时再试。"
             )
             print(msg)
             tg_send(msg)
@@ -269,10 +271,13 @@ async def main():
         await asyncio.sleep(3)
         expiry_after = await page.evaluate(JS_EXPIRY) or ""
         print("领取后剩余时间:", expiry_after)
+        short_b = re.search(r"expires in ([0-9A-Z ]+?)\.", expiry_before or "")
+        short_a = re.search(r"expires in ([0-9A-Z ]+?)\.", expiry_after or "")
         msg = (
-            f"Pella 续期成功：领取 {claimed} 条链接（每条 +16 小时）\n"
-            f"剩余时间：{expiry_before or '未读到'} -> {expiry_after or '未读到'}\n"
-            "服务器 pella-node 仍在运行。"
+            "🇺🇸 Pella 续期通知\n"
+            f"✅ 续期成功：领取 {claimed} 条链接（每条 +16 小时）\n"
+            f"⏱ 剩余时间：{short_b.group(1) if short_b else (expiry_before or '未读到')} → {short_a.group(1) if short_a else (expiry_after or '未读到')}\n"
+            "🖥️ 服务器 pella-node 仍在运行。"
         )
         print(msg)
         tg_send(msg)
