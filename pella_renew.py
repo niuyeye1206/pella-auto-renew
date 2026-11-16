@@ -2,7 +2,9 @@
 """Pella.app 免费服务器自动续期。
 
 流程：登录面板 -> 打开服务器详情页 -> 领取所有可用的 "Claim 16 Hours" 链接
-（每条 +16 小时，每天刷新两条）-> 读新的剩余有效期 -> TG 通知。
+（每条 +16 小时，每天刷新两条）-> 读新的剩余有效期 -> 点 RESTART 重启一次
+（领完不重启节点不恢复；面板上没有一键 Redeploy，New Deploy 要重新传 zip，
+RESTART 即等效操作）-> TG 通知。
 环境变量：PELLA_EMAIL / PELLA_PASSWORD / TG_BOT_TOKEN / TG_CHAT_ID / SERVER_URL
 """
 import asyncio
@@ -277,10 +279,27 @@ async def main():
         await asyncio.sleep(3)
         expiry_after = await page.evaluate(JS_EXPIRY) or ""
         print("领取后剩余时间:", expiry_after)
+
+        # ---- 领完点 RESTART 重启一次，否则节点不恢复 ----
+        restarted = False
+        restart_note = ""
+        if claimed > 0:
+            restart_btn = await find_handle(page, JS_FIND_BUTTON, "RESTART")
+            if restart_btn:
+                await restart_btn.click()
+                print("已点 RESTART，等 60 秒让服务器恢复...")
+                await asyncio.sleep(60)
+                restarted = True
+                restart_note = "🔄 已点 RESTART，节点重启恢复中。"
+            else:
+                print("没找到 RESTART 按钮，未重启")
+                restart_note = "⚠️ 没找到 RESTART 按钮，节点可能仍需手动重启。"
+
         msg = (
             "🇺🇸 Pella 续期通知\n"
             f"✅ 续期成功：领取 {claimed} 条链接（每条 +16 小时）\n"
             f"⏱ 剩余时间：{short_expiry(expiry_before)} → {short_expiry(expiry_after)}\n"
+            f"{restart_note}\n"
             "🖥️ 服务器 pella-node 仍在运行。"
         )
         print(msg)
